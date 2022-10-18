@@ -1,7 +1,7 @@
 package main
 
 import (
-	Chat "Chitty_Chat/Chat"
+	Chat "Golang_Chat_System/Chat"
 	"context"
 	"fmt"
 	"log"
@@ -11,16 +11,13 @@ import (
 	"google.golang.org/grpc"
 )
 
-var lamport int32
-
 type ChatServer struct {
-	Chat.UnimplementedChittyChatServiceServer
+	Chat.UnimplementedChattingServiceServer
 }
 
-var users = make(map[int32]Chat.ChittyChatService_JoinChatServer)
+var users = make(map[int32]Chat.ChattingService_JoinChatServer)
 
 func main() {
-	lamport = 0
 
 	listen, err := net.Listen("tcp", ":8007")
 	if err != nil {
@@ -31,9 +28,9 @@ func main() {
 	// Creates empty gRPC server
 	grpcServer := grpc.NewServer()
 
-	// Creates instance of our ChittyChatServer struct and binds it with our empty gRPC server.
+	// Creates instance of our ChatServiceServer struct and binds it with our empty gRPC server.
 	ccs := ChatServer{}
-	Chat.RegisterChittyChatServiceServer(grpcServer, &ccs)
+	Chat.RegisterChattingServiceServer(grpcServer, &ccs)
 
 	err = grpcServer.Serve(listen)
 	if err != nil {
@@ -41,11 +38,7 @@ func main() {
 	}
 }
 
-func (c *ChatServer) JoinChat(user *Chat.User, ccsi Chat.ChittyChatService_JoinChatServer) error {
-	incomingLamport := user.Lamport
-
-	lamport = max(lamport, incomingLamport)
-	lamport++
+func (c *ChatServer) JoinChat(user *Chat.User, ccsi Chat.ChattingService_JoinChatServer) error {
 
 	users[user.Id] = ccsi
 
@@ -58,7 +51,7 @@ func (c *ChatServer) JoinChat(user *Chat.User, ccsi Chat.ChittyChatService_JoinC
 
 	body := fmt.Sprintf(user.Name + " has joined the chat")
 
-	Broadcast(&Chat.FromClient{Name: "ServerMessage", Body: body, Lamport: lamport})
+	Broadcast(&Chat.ClientContent{Name: "ServerMessage", Body: body})
 
 	// block function
 	bl := make(chan bool)
@@ -67,49 +60,45 @@ func (c *ChatServer) JoinChat(user *Chat.User, ccsi Chat.ChittyChatService_JoinC
 	return nil
 }
 
-func (s *ChatServer) LeaveChat(ctx context.Context, user *Chat.User) (*Chat.Empty, error) {
-	incomingLamport := user.Lamport
-	lamport = max(lamport, incomingLamport)
-	lamport++
-
-	delete(users, user.Id)
-	// updateTimestamp(int(user.Timestamp))
-	Broadcast(&Chat.FromClient{Name: "ServerMessage", Body: user.Name + " has left the chat at Lamport time ", Lamport: lamport})
-	return &Chat.Empty{}, nil
-}
-
-//ChatService
-func (is *ChatServer) Publish(ctx context.Context, msg *Chat.FromClient) (*Chat.Empty, error) {
-
-	incomingLamport := msg.Lamport
-	lamport = max(lamport, incomingLamport)
-	lamport++
-
-	msg.Lamport = lamport
+func (is *ChatServer) SendContent(ctx context.Context, msg *Chat.ClientContent) (*Chat.Empty, error) {
 
 	Broadcast(msg)
 	return &Chat.Empty{}, nil
 }
 
-func Broadcast(msg *Chat.FromClient) {
+func Broadcast(msg *Chat.ClientContent) {
 	name := msg.Name
 	body := msg.Body
-	time := msg.Lamport
 
-	log.Printf("%s : %s %d", name, body, time)
+	log.Printf("%s : %s", name, body)
 
 	for key, value := range users {
-		err := value.Send(&Chat.FromServer{Name: name, Body: body, Lamport: time})
+		err := value.Send(&Chat.FromServer{Name: name, Body: body})
 		if err != nil {
 			log.Println("Failed to broadcast to "+string(key)+": ", err)
 		}
 	}
 }
 
-func max(x, y int32) int32 {
-	if x > y {
-		return x
-	} else {
-		return y
+func (is *ChatServer) RevealAll(ctx context.Context, msg *Chat.ClientRevelation) (*Chat.Empty, error) {
+
+	InfoBroadcast(msg)
+	return &Chat.Empty{}, nil
+}
+
+func InfoBroadcast(msg *Chat.ClientRevelation) {
+	name := msg.Name
+	c := msg.C
+	m := msg.M
+	r := msg.R
+	result := msg.Result
+
+	log.Printf("%s : [%d, %d, %d, %d]", name, c, m, r, result)
+
+	for key, value := range users {
+		err := value.Send(&Chat.FromServer{Name: name, Body: fmt.Sprintf("[%d, %d, %d, %d]", c, m, r, result)})
+		if err != nil {
+			log.Println("Failed to broadcast to "+string(key)+": ", err)
+		}
 	}
 }

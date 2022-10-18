@@ -3,28 +3,33 @@ syntax = "proto3";
 package Chat;
 option go_package = "./Chat";
 
-message FromClient {
+message ClientContent {
     string name = 1;
     string body = 2;
-    int32 lamport = 3;
+}
+
+message ClientRevelation {
+    string name = 1;
+    int32 c = 2;
+    int32 m = 3;
+    int32 r = 4;
+    int32 result = 5;
 }
 
 message FromServer {
     string name = 1;
     string body = 2;
-    int32 lamport = 3;
 }
 
 message User {
     int32 id = 1;
     string name = 2;
-    int32 lamport = 3;
 }
 
 message Empty {}
 
-service ChittyChatService {
+service ChattingService {
     rpc JoinChat(User) returns (stream FromServer){};
-    rpc Publish(FromClient) returns (Empty){};
-    rpc LeaveChat(User) returns (Empty){}
+    rpc SendContent(ClientContent) returns (Empty){};
+    rpc RevealAll(ClientRevelation) returns (Empty){};
  }
