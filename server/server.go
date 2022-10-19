@@ -48,7 +48,7 @@ func (c *ChatServer) JoinChat(user *Chat.User, ccsi Chat.ChattingService_JoinCha
 		}
 	}()
 
-	body := fmt.Sprintf(user.Name + " has joined the chat")
+	body := fmt.Sprintf(user.Name + " has joined the chat. The new user's public key should now be validated by the server via. Public Key Autherization.")
 
 	Broadcast(&Chat.ClientContent{Name: "ServerMessage", Body: body})
 
