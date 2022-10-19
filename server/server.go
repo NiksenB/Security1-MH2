@@ -3,12 +3,14 @@ package main
 import (
 	Chat "Golang_Chat_System/Chat"
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log"
 	"net"
 	"os"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 type ChatServer struct {
@@ -18,6 +20,14 @@ type ChatServer struct {
 var users = make(map[int32]Chat.ChattingService_JoinChatServer)
 
 func main() {
+	cert, err := tls.LoadX509KeyPair("512b-dsa-example-cert.pem", "512b-dsa-example-keypair.pem")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	opts := []grpc.ServerOption{
+		grpc.Creds(credentials.NewServerTLSFromCert(&cert)),
+	}
 
 	listen, err := net.Listen("tcp", ":8007")
 	if err != nil {
@@ -25,12 +35,14 @@ func main() {
 	}
 	log.Println(":8007 is listening")
 
-	// Creates empty gRPC server
-	grpcServer := grpc.NewServer()
-
-	// Creates instance of our ChatServiceServer struct and binds it with our empty gRPC server.
+	// Creates gRPC server with TLS credentials
+	grpcServer := grpc.NewServer(opts...)
 	ccs := ChatServer{}
 	Chat.RegisterChattingServiceServer(grpcServer, &ccs)
+
+	// Creates instance of our ChatServiceServer struct and binds it with our empty gRPC server.
+	// ccs := ChatServer{}
+	// Chat.RegisterChattingServiceServer(grpcServer, &ccs)
 
 	err = grpcServer.Serve(listen)
 	if err != nil {
