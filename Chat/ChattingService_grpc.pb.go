@@ -19,8 +19,8 @@ const _ = grpc.SupportPackageIsVersion7
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ChattingServiceClient interface {
 	JoinChat(ctx context.Context, in *User, opts ...grpc.CallOption) (ChattingService_JoinChatClient, error)
+	SendEncrypted(ctx context.Context, in *ClientEncrypted, opts ...grpc.CallOption) (*Empty, error)
 	SendContent(ctx context.Context, in *ClientContent, opts ...grpc.CallOption) (*Empty, error)
-	RevealAll(ctx context.Context, in *ClientRevelation, opts ...grpc.CallOption) (*Empty, error)
 }
 
 type chattingServiceClient struct {
@@ -63,18 +63,18 @@ func (x *chattingServiceJoinChatClient) Recv() (*FromServer, error) {
 	return m, nil
 }
 
-func (c *chattingServiceClient) SendContent(ctx context.Context, in *ClientContent, opts ...grpc.CallOption) (*Empty, error) {
+func (c *chattingServiceClient) SendEncrypted(ctx context.Context, in *ClientEncrypted, opts ...grpc.CallOption) (*Empty, error) {
 	out := new(Empty)
-	err := c.cc.Invoke(ctx, "/Chat.ChattingService/SendContent", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/Chat.ChattingService/SendEncrypted", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *chattingServiceClient) RevealAll(ctx context.Context, in *ClientRevelation, opts ...grpc.CallOption) (*Empty, error) {
+func (c *chattingServiceClient) SendContent(ctx context.Context, in *ClientContent, opts ...grpc.CallOption) (*Empty, error) {
 	out := new(Empty)
-	err := c.cc.Invoke(ctx, "/Chat.ChattingService/RevealAll", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/Chat.ChattingService/SendContent", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -86,8 +86,8 @@ func (c *chattingServiceClient) RevealAll(ctx context.Context, in *ClientRevelat
 // for forward compatibility
 type ChattingServiceServer interface {
 	JoinChat(*User, ChattingService_JoinChatServer) error
+	SendEncrypted(context.Context, *ClientEncrypted) (*Empty, error)
 	SendContent(context.Context, *ClientContent) (*Empty, error)
-	RevealAll(context.Context, *ClientRevelation) (*Empty, error)
 	mustEmbedUnimplementedChattingServiceServer()
 }
 
@@ -98,11 +98,11 @@ type UnimplementedChattingServiceServer struct {
 func (UnimplementedChattingServiceServer) JoinChat(*User, ChattingService_JoinChatServer) error {
 	return status.Errorf(codes.Unimplemented, "method JoinChat not implemented")
 }
+func (UnimplementedChattingServiceServer) SendEncrypted(context.Context, *ClientEncrypted) (*Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SendEncrypted not implemented")
+}
 func (UnimplementedChattingServiceServer) SendContent(context.Context, *ClientContent) (*Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SendContent not implemented")
-}
-func (UnimplementedChattingServiceServer) RevealAll(context.Context, *ClientRevelation) (*Empty, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method RevealAll not implemented")
 }
 func (UnimplementedChattingServiceServer) mustEmbedUnimplementedChattingServiceServer() {}
 
@@ -138,6 +138,24 @@ func (x *chattingServiceJoinChatServer) Send(m *FromServer) error {
 	return x.ServerStream.SendMsg(m)
 }
 
+func _ChattingService_SendEncrypted_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ClientEncrypted)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChattingServiceServer).SendEncrypted(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/Chat.ChattingService/SendEncrypted",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChattingServiceServer).SendEncrypted(ctx, req.(*ClientEncrypted))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ChattingService_SendContent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ClientContent)
 	if err := dec(in); err != nil {
@@ -156,24 +174,6 @@ func _ChattingService_SendContent_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
-func _ChattingService_RevealAll_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ClientRevelation)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ChattingServiceServer).RevealAll(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/Chat.ChattingService/RevealAll",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ChattingServiceServer).RevealAll(ctx, req.(*ClientRevelation))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // ChattingService_ServiceDesc is the grpc.ServiceDesc for ChattingService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -182,12 +182,12 @@ var ChattingService_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*ChattingServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "SendContent",
-			Handler:    _ChattingService_SendContent_Handler,
+			MethodName: "SendEncrypted",
+			Handler:    _ChattingService_SendEncrypted_Handler,
 		},
 		{
-			MethodName: "RevealAll",
-			Handler:    _ChattingService_RevealAll_Handler,
+			MethodName: "SendContent",
+			Handler:    _ChattingService_SendContent_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
@@ -197,5 +197,5 @@ var ChattingService_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 	},
-	Metadata: "ChattingService.proto",
+	Metadata: "Chat/ChattingService.proto",
 }

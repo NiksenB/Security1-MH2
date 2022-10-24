@@ -15,7 +15,7 @@ type ChatServer struct {
 	Chat.UnimplementedChattingServiceServer
 }
 
-var users = make(map[int32]Chat.ChattingService_JoinChatServer)
+var users = make(map[int64]Chat.ChattingService_JoinChatServer)
 
 func main() {
 	listen, err := net.Listen("tcp", ":8007")
@@ -50,7 +50,7 @@ func (c *ChatServer) JoinChat(user *Chat.User, ccsi Chat.ChattingService_JoinCha
 
 	body := fmt.Sprintf(user.Name + " has joined the chat. The new user's public key should now be validated by the server via. Public Key Autherization.")
 
-	Broadcast(&Chat.ClientContent{Name: "ServerMessage", Body: body})
+	Broadcast("ServerMessage", body)
 
 	// block function
 	bl := make(chan bool)
@@ -60,42 +60,26 @@ func (c *ChatServer) JoinChat(user *Chat.User, ccsi Chat.ChattingService_JoinCha
 }
 
 func (is *ChatServer) SendContent(ctx context.Context, msg *Chat.ClientContent) (*Chat.Empty, error) {
+	name := msg.Name
+	body := msg.Body
 
-	Broadcast(msg)
+	Broadcast(name, body)
 	return &Chat.Empty{}, nil
 }
 
-func Broadcast(msg *Chat.ClientContent) {
+func (is *ChatServer) SendEncrypted(ctx context.Context, msg *Chat.ClientEncrypted) (*Chat.Empty, error) {
 	name := msg.Name
-	body := msg.Body
+	body := fmt.Sprintf("(%d,%d)", msg.C1, msg.C2)
+	Broadcast(name, body)
+	return &Chat.Empty{}, nil
+}
+
+func Broadcast(name string, body string) {
 
 	log.Printf("%s : %s", name, body)
 
 	for key, value := range users {
 		err := value.Send(&Chat.FromServer{Name: name, Body: body})
-		if err != nil {
-			log.Println("Failed to broadcast to "+string(key)+": ", err)
-		}
-	}
-}
-
-func (is *ChatServer) RevealAll(ctx context.Context, msg *Chat.ClientRevelation) (*Chat.Empty, error) {
-
-	InfoBroadcast(msg)
-	return &Chat.Empty{}, nil
-}
-
-func InfoBroadcast(msg *Chat.ClientRevelation) {
-	name := msg.Name
-	c := msg.C
-	m := msg.M
-	r := msg.R
-	result := msg.Result
-
-	log.Printf("%s : [%d, %d, %d, %d]", name, c, m, r, result)
-
-	for key, value := range users {
-		err := value.Send(&Chat.FromServer{Name: name, Body: fmt.Sprintf("[%d, %d, %d, %d]", c, m, r, result)})
 		if err != nil {
 			log.Println("Failed to broadcast to "+string(key)+": ", err)
 		}
