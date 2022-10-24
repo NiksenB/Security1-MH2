@@ -124,7 +124,7 @@ func (ch *clientHandle) sendMessage(client Chat.ChattingServiceClient) {
 				log.Printf("Error while sending to server :: %v", err)
 			}
 		} else {
-			log.Print("I didn't get that message. You can write the following exchange:\nmake commitment\nsend roll\nreveal commitment\nvalidate commitment")
+			log.Print("I didn't get that message. You can write the following exchange:\nmake commitment\nsend roll\nreveal commitment\nvalidate commitment\n")
 		}
 
 		time.Sleep(500 * time.Millisecond)
