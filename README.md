@@ -13,7 +13,7 @@ Name the two clients whatever, then do the following exchange:
 ### client 1
 
 ```
-send commitment
+make commitment
 ```
 
 ### client 2
