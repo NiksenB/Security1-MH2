@@ -286,7 +286,6 @@ func unpackIntFloatTouple(msg string) (int64, float64) {
 	if err != nil {
 		log.Fatalf("can not unpack c1 %v", err)
 	}
-	log.Printf("c2 has val: %s", vals[1])
 	c2, err := strconv.ParseFloat(vals[1], 32)
 	if err != nil {
 		log.Fatalf("can not unpack c2: %v", err)
