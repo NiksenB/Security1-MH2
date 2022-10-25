@@ -25,8 +25,8 @@ var recievedRoll int64
 var commitment int64
 var randCE int64
 
-var privateKey int64 = 7
-var othersPublicKey int64 = 637
+var privateKey int64 = 66
+var othersPublicKey int64 = 2227
 
 type clientHandle struct {
 	stream     Chat.ChattingService_JoinChatClient
@@ -39,7 +39,6 @@ func main() {
 
 	log.Println("Connecting : " + serverID)
 	conn, err := grpc.Dial(serverID, grpc.WithInsecure())
-
 	if err != nil {
 		log.Fatalf("Failed to connect gRPC server :: %v", err)
 	}
@@ -49,7 +48,6 @@ func main() {
 
 	ch := clientHandle{}
 	ch.clientConfig()
-
 	rand.Seed(time.Now().UnixNano())
 	ch.Id = rand.Int63()
 
@@ -62,7 +60,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to get response from gRPC server :: %v", err)
 	}
-
 	ch.stream = _stream
 
 	go ch.sendMessage(client)
@@ -84,18 +81,18 @@ func (ch *clientHandle) clientConfig() {
 }
 
 func encrypt(m int64) (int64, int64) {
-	//r = rand.Int31n(p - 1)
-	c1 := int64(math.Mod(math.Pow(float64(g), float64(privateKey)), float64(p)))
-
-	i := math.Mod(math.Pow(float64(othersPublicKey), float64(privateKey)), float64(p))
-	c2 := int64(m) * int64(i) % int64(p)
+	//r := rand.Int63n(p - 1)
+	c1 := modPow(g, privateKey, p)
+	i := modPow(othersPublicKey, privateKey, p)
+	c2 := m * i % p
 	return c1, c2
 }
 
 func decrypt(c1 int64, c2 int64) int64 {
-	s := int64(math.Pow(float64(c1), float64(privateKey))) % p
-	inv := int64(math.Pow(float64(s), float64(p-2))) % p
-	return c2 * inv % p
+	s := modPow(c1, privateKey, p)
+	inv := modPow(s, p-2, p)
+	m := c2 * inv % p
+	return m
 }
 
 func (ch *clientHandle) sendMessage(client Chat.ChattingServiceClient) {
@@ -139,10 +136,35 @@ func (ch *clientHandle) sendMessage(client Chat.ChattingServiceClient) {
 				log.Printf("Error while sending to server :: %v", err)
 			}
 		} else {
-			log.Print("I didn't get that message. You can write the following exchange:\nmake commitment\nsend roll\nreveal commitment\nvalidate commitment\n")
+			log.Print("I didn't understand that message. You should only write the following exchange:\nA: make commitment\nB: send roll\nA: reveal commitment\nB: validate commitment\n\n")
 		}
 
 		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+func (ch *clientHandle) receiveMessage() {
+
+	for {
+		resp, err := ch.stream.Recv()
+		if err != nil {
+			log.Fatalf("can not receive %v", err)
+		}
+		log.Printf("%s : %s", resp.Name, resp.Body)
+
+		if strings.HasPrefix(resp.Body, "(") && strings.HasSuffix(resp.Body, ")") {
+			c1, c2 := unpackTouple(resp.Body)
+			log.Printf("Decrypted message: %d", decrypt(c1, c2))
+
+		} else if strings.HasPrefix(resp.Body, "[") && strings.HasSuffix(resp.Body, "]") {
+			trimmedS := resp.Body[1 : len(resp.Body)-1]
+			touples := strings.Split(trimmedS, ", ")
+
+			commitment = decrypt(unpackTouple(touples[0]))
+			recievedRoll = decrypt(unpackTouple(touples[1]))
+			randCE = decrypt(unpackTouple(touples[2]))
+			log.Printf("Decrypted message (c, roll, r): %d, %d, %d", commitment, recievedRoll, randCE)
+		}
 	}
 }
 
@@ -180,8 +202,10 @@ func computeRoll() int64 {
 }
 
 func (ch *clientHandle) validate() {
-	if math.Pow(float64(g), float64(recievedRoll))*math.Pow(float64(h), float64(randCE)) == float64(commitment) {
-		log.Printf("I have validated the commitment and agreed. The shared roll is %d", computeRoll())
+	//comCheck := math.Pow(float64(g), float64(recievedRoll))*math.Pow(float64(h), float64(randCE))
+	comCheck := modPow(g, recievedRoll, p) * modPow(h, randCE, p) % p
+	if comCheck == commitment {
+		log.Printf("I have validated the commitment and agreed. The shared roll is then: %d", computeRoll())
 	} else {
 		log.Printf("I don't trust this result. %f is not the same as %f", math.Pow(float64(g), float64(recievedRoll))*math.Pow(float64(h), float64(randCE)), float64(commitment))
 	}
@@ -190,7 +214,8 @@ func (ch *clientHandle) validate() {
 func generatePedersenCommitment(m int64) int64 {
 	randCE = rand.Int63n(p) // random element in the group
 	log.Printf("Random element r: %d", randCE)
-	commitment = int64(math.Pow(float64(g), float64(m)) * math.Pow(float64(h), float64(randCE)))
+	//commitment = int64(math.Pow(float64(g), float64(m)) * math.Pow(float64(h), float64(randCE)))
+	commitment = (modPow(g, m, p) * modPow(h, randCE, p)) % p
 	log.Printf("Commitment c: %d", commitment)
 	return commitment
 }
@@ -208,27 +233,10 @@ func unpackTouple(msg string) (int64, int64) {
 	return c1, c2
 }
 
-func (ch *clientHandle) receiveMessage() {
-
-	for {
-		resp, err := ch.stream.Recv()
-		if err != nil {
-			log.Fatalf("can not receive %v", err)
-		}
-		log.Printf("%s : %s", resp.Name, resp.Body)
-
-		if strings.HasPrefix(resp.Body, "(") && strings.HasSuffix(resp.Body, ")") {
-			c1, c2 := unpackTouple(resp.Body)
-			log.Printf("Decrypted message: %d", decrypt(c1, c2))
-
-		} else if strings.HasPrefix(resp.Body, "[") && strings.HasSuffix(resp.Body, "]") {
-			trimmedS := resp.Body[1 : len(resp.Body)-1]
-			touples := strings.Split(trimmedS, ", ")
-
-			commitment = decrypt(unpackTouple(touples[0]))
-			recievedRoll = decrypt(unpackTouple(touples[1]))
-			randCE = decrypt(unpackTouple(touples[2]))
-			log.Printf("Decrypted message: %d, %d, %d", commitment, recievedRoll, randCE)
-		}
+func modPow(x int64, r int64, p int64) int64 {
+	sum := float64(x)
+	for i := int64(1); i < r; i++ {
+		sum = math.Mod(float64(x)*sum, float64(p))
 	}
+	return int64(sum)
 }
