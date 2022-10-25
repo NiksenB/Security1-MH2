@@ -3,7 +3,9 @@ package main
 import (
 	Chat "Golang_Chat_System/Chat"
 	"bufio"
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"log"
 	"math"
@@ -30,7 +32,6 @@ var othersPublicKey int64 = 2227
 
 type clientHandle struct {
 	stream     Chat.ChattingService_JoinChatClient
-	Id         int64
 	clientName string
 }
 
@@ -49,10 +50,8 @@ func main() {
 	ch := clientHandle{}
 	ch.clientConfig()
 	rand.Seed(time.Now().UnixNano())
-	ch.Id = rand.Int63()
 
 	var user = &Chat.User{
-		Id:   ch.Id,
 		Name: ch.clientName,
 	}
 
@@ -80,15 +79,36 @@ func (ch *clientHandle) clientConfig() {
 	ch.clientName = strings.TrimRight(msg, "\r\n")
 }
 
-func encrypt(m int64) (int64, int64) {
+func SHA256FromInt(message int64) []byte {
+	s := fmt.Sprintf("%d", message)
+	return SHA256FromString(s)
+}
+
+func SHA256FromString(message string) []byte {
+	h := sha256.New()
+	h.Write([]byte(message))
+	return h.Sum(nil)
+}
+
+func validateSHAFromInt(decrMsg int64, sig []byte) int {
+	digest := SHA256FromInt(decrMsg)
+	return bytes.Compare(digest, sig)
+}
+
+func validateSHAFromString(decrMsg string, sig []byte) int {
+	digest := SHA256FromString(decrMsg)
+	return bytes.Compare(digest, sig)
+}
+
+func encryptMsg(m int64) (int64, int64) {
 	//r := rand.Int63n(p - 1)
 	c1 := modPow(g, privateKey, p)
-	i := modPow(othersPublicKey, privateKey, p)
-	c2 := m * i % p
+	k := modPow(othersPublicKey, privateKey, p) // shared secret
+	c2 := m * k % p
 	return c1, c2
 }
 
-func decrypt(c1 int64, c2 int64) int64 {
+func decryptMsg(c1 int64, c2 int64) int64 {
 	s := modPow(c1, privateKey, p)
 	inv := modPow(s, p-2, p)
 	m := c2 * inv % p
@@ -107,14 +127,22 @@ func (ch *clientHandle) sendMessage(client Chat.ChattingServiceClient) {
 		}
 
 		if strings.HasPrefix(clientMessage, "reveal commitment") {
-			formattedMsg := ch.formatArrayMessage()
-			_, err = client.SendContent(context.Background(), formattedMsg)
+			valueString := fmt.Sprintf("[%d, %d, %d]", commitment, myRoll, randCE)
+			log.Printf("I'm sending these three values (c, roll, r): %s", valueString)
+			signature := SHA256FromString(valueString)
+			enCom := formatTouple(encryptMsg(commitment))
+			enRoll := formatTouple(encryptMsg(myRoll))
+			enRan := formatTouple(encryptMsg(randCE))
+			formattedBody := fmt.Sprintf("[%s, %s, %s]", enCom, enRoll, enRan)
+			msg := &Chat.ClientEncrypted{
+				Name:      ch.clientName,
+				Message:   formattedBody,
+				Signature: signature,
+			}
+			_, err = client.SendEncrypted(context.Background(), msg)
 			if err != nil {
 				log.Printf("Error while sending to server :: %v", err)
 			}
-
-		} else if strings.HasPrefix(clientMessage, "validate commitment") {
-			ch.validate()
 
 		} else if strings.HasPrefix(clientMessage, "make commitment") || strings.HasPrefix(clientMessage, "send roll") {
 			var message int64
@@ -124,17 +152,22 @@ func (ch *clientHandle) sendMessage(client Chat.ChattingServiceClient) {
 			} else if strings.HasPrefix(clientMessage, "send roll") {
 				message = ch.rollDice()
 			}
-			c1, c2 := encrypt(message)
+			c1, c2 := encryptMsg(message)
+			m := fmt.Sprintf("(%d,%d)", c1, c2)
+			bs := SHA256FromInt(message)
 
 			msg := &Chat.ClientEncrypted{
-				Name: ch.clientName,
-				C1:   c1,
-				C2:   c2,
+				Name:      ch.clientName,
+				Message:   m,
+				Signature: bs,
 			}
 			_, err = client.SendEncrypted(context.Background(), msg)
 			if err != nil {
 				log.Printf("Error while sending to server :: %v", err)
 			}
+
+		} else if strings.HasPrefix(clientMessage, "validate commitment") {
+			ch.validate()
 		} else {
 			log.Print("I didn't understand that message. You should only write the following exchange:\nA: make commitment\nB: send roll\nA: reveal commitment\nB: validate commitment\n\n")
 		}
@@ -150,36 +183,34 @@ func (ch *clientHandle) receiveMessage() {
 		if err != nil {
 			log.Fatalf("can not receive %v", err)
 		}
-		log.Printf("%s : %s", resp.Name, resp.Body)
+		fmt.Printf("\n%s : %s (signed)\n", resp.Name, resp.Body)
+
+		sig := resp.Signature
+		var sigValidation int
 
 		if strings.HasPrefix(resp.Body, "(") && strings.HasSuffix(resp.Body, ")") {
 			c1, c2 := unpackTouple(resp.Body)
-			log.Printf("Decrypted message: %d", decrypt(c1, c2))
+			msgContent := decryptMsg(c1, c2)
+			sigValidation = validateSHAFromInt(msgContent, sig)
+			log.Printf("Decrypted message: %d", msgContent)
 
 		} else if strings.HasPrefix(resp.Body, "[") && strings.HasSuffix(resp.Body, "]") {
 			trimmedS := resp.Body[1 : len(resp.Body)-1]
 			touples := strings.Split(trimmedS, ", ")
-
-			commitment = decrypt(unpackTouple(touples[0]))
-			recievedRoll = decrypt(unpackTouple(touples[1]))
-			randCE = decrypt(unpackTouple(touples[2]))
+			commitment = decryptMsg(unpackTouple(touples[0]))
+			recievedRoll = decryptMsg(unpackTouple(touples[1]))
+			randCE = decryptMsg(unpackTouple(touples[2]))
+			msgContent := fmt.Sprintf("[%d, %d, %d]", commitment, recievedRoll, randCE)
+			sigValidation = validateSHAFromString(msgContent, sig)
 			log.Printf("Decrypted message (c, roll, r): %d, %d, %d", commitment, recievedRoll, randCE)
 		}
-	}
-}
 
-func (ch *clientHandle) formatArrayMessage() *Chat.ClientContent {
-	log.Printf("My commitment was %d", commitment)
-	enCom := formatTouple(encrypt(commitment))
-	enRoll := formatTouple(encrypt(myRoll))
-	enRan := formatTouple(encrypt(randCE))
-
-	formattedBody := fmt.Sprintf("[%s, %s, %s]", enCom, enRoll, enRan)
-	msg := &Chat.ClientContent{
-		Name: ch.clientName,
-		Body: formattedBody,
+		if sigValidation == 0 {
+			log.Printf("Signature has been validated.\n\n")
+		} else {
+			log.Printf("Signature could not be validated\n\n")
+		}
 	}
-	return msg
 }
 
 func formatTouple(i int64, j int64) string {

@@ -15,7 +15,7 @@ type ChatServer struct {
 	Chat.UnimplementedChattingServiceServer
 }
 
-var users = make(map[int64]Chat.ChattingService_JoinChatServer)
+var users = make(map[string]Chat.ChattingService_JoinChatServer)
 
 func main() {
 	listen, err := net.Listen("tcp", ":8007")
@@ -39,7 +39,7 @@ func main() {
 
 func (c *ChatServer) JoinChat(user *Chat.User, ccsi Chat.ChattingService_JoinChatServer) error {
 
-	users[user.Id] = ccsi
+	users[user.Name] = ccsi
 
 	defer func() {
 		if err := recover(); err != nil {
@@ -50,7 +50,7 @@ func (c *ChatServer) JoinChat(user *Chat.User, ccsi Chat.ChattingService_JoinCha
 
 	body := fmt.Sprintf(user.Name + " has joined the chat. The new user's public key should now be validated by the server via. Public Key Autherization.")
 
-	Broadcast("ServerMessage", body)
+	Broadcast("ServerMessage", body, []byte{})
 
 	// block function
 	bl := make(chan bool)
@@ -59,29 +59,21 @@ func (c *ChatServer) JoinChat(user *Chat.User, ccsi Chat.ChattingService_JoinCha
 	return nil
 }
 
-func (is *ChatServer) SendContent(ctx context.Context, msg *Chat.ClientContent) (*Chat.Empty, error) {
-	name := msg.Name
-	body := msg.Body
-
-	Broadcast(name, body)
-	return &Chat.Empty{}, nil
-}
-
 func (is *ChatServer) SendEncrypted(ctx context.Context, msg *Chat.ClientEncrypted) (*Chat.Empty, error) {
-	name := msg.Name
-	body := fmt.Sprintf("(%d,%d)", msg.C1, msg.C2)
-	Broadcast(name, body)
+	Broadcast(msg.Name, msg.Message, msg.Signature)
 	return &Chat.Empty{}, nil
 }
 
-func Broadcast(name string, body string) {
+func Broadcast(name string, body string, signature []byte) {
 
-	log.Printf("%s : %s", name, body)
+	log.Printf("%s : %s)", name, body)
 
 	for key, value := range users {
-		err := value.Send(&Chat.FromServer{Name: name, Body: body})
-		if err != nil {
-			log.Println("Failed to broadcast to "+string(key)+": ", err)
+		if key != name {
+			err := value.Send(&Chat.FromServer{Name: name, Body: body, Signature: signature})
+			if err != nil {
+				log.Println("Failed to broadcast to "+string(key)+": ", err)
+			}
 		}
 	}
 }

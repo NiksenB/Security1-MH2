@@ -3,24 +3,19 @@ syntax = "proto3";
 package Chat;
 option go_package = "./Chat";
 
-message ClientContent {
-    string name = 1;
-    string body = 2;
-}
-
 message ClientEncrypted {
     string name = 1;
-    int64 c1 = 2;
-    int64 c2 = 3;
+    string message = 2;
+    bytes signature = 3;
 }
 
 message FromServer {
     string name = 1;
     string body = 2; 
+    bytes signature = 3;
 }
 
 message User {
-    int64 id = 1;
     string name = 2;
 }
 
@@ -29,5 +24,4 @@ message Empty {}
 service ChattingService {
     rpc JoinChat(User) returns (stream FromServer){};
     rpc SendEncrypted(ClientEncrypted) returns (Empty){};
-    rpc SendContent(ClientContent) returns (Empty){};
 }
