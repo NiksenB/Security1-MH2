@@ -3,10 +3,10 @@ package main
 import (
 	Chat "Golang_Chat_System/Chat"
 	"bufio"
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"hash/fnv"
 	"log"
 	"math"
 	"math/rand"
@@ -90,15 +90,15 @@ func SHA256FromString(message string) []byte {
 	return h.Sum(nil)
 }
 
-func validateSHAFromInt(decrMsg int64, sig []byte) int {
-	digest := SHA256FromInt(decrMsg)
-	return bytes.Compare(digest, sig)
-}
+// func validateSHAFromInt(decrMsg int64, sig []byte) int {
+// 	digest := SHA256FromInt(decrMsg)
+// 	return bytes.Compare(digest, sig)
+// }
 
-func validateSHAFromString(decrMsg string, sig []byte) int {
-	digest := SHA256FromString(decrMsg)
-	return bytes.Compare(digest, sig)
-}
+// func validateSHAFromString(decrMsg string, sig []byte) int {
+// 	digest := SHA256FromString(decrMsg)
+// 	return bytes.Compare(digest, sig)
+// }
 
 func encryptMsg(m int64) (int64, int64) {
 	//r := rand.Int63n(p - 1)
@@ -129,7 +129,11 @@ func (ch *clientHandle) sendMessage(client Chat.ChattingServiceClient) {
 		if strings.HasPrefix(clientMessage, "reveal commitment") {
 			valueString := fmt.Sprintf("[%d, %d, %d]", commitment, myRoll, randCE)
 			log.Printf("I'm sending these three values (c, roll, r): %s", valueString)
-			signature := SHA256FromString(valueString)
+
+			//signature := SHA256FromString(valueString)
+			rEG, sEG := elGamalSignatureFromString(valueString)
+			signature := fmt.Sprintf("(%d,%f)", rEG, sEG)
+
 			enCom := formatTouple(encryptMsg(commitment))
 			enRoll := formatTouple(encryptMsg(myRoll))
 			enRan := formatTouple(encryptMsg(randCE))
@@ -154,12 +158,14 @@ func (ch *clientHandle) sendMessage(client Chat.ChattingServiceClient) {
 			}
 			c1, c2 := encryptMsg(message)
 			m := fmt.Sprintf("(%d,%d)", c1, c2)
-			bs := SHA256FromInt(message)
+			//bs := SHA256FromInt(message)
+			rEG, sEG := elGamalSignatureFromInt(message)
+			sig := fmt.Sprintf("(%d,%f)", rEG, sEG)
 
 			msg := &Chat.ClientEncrypted{
 				Name:      ch.clientName,
 				Message:   m,
-				Signature: bs,
+				Signature: sig,
 			}
 			_, err = client.SendEncrypted(context.Background(), msg)
 			if err != nil {
@@ -185,27 +191,35 @@ func (ch *clientHandle) receiveMessage() {
 		}
 		fmt.Printf("\n%s : %s (signed)\n", resp.Name, resp.Body)
 
-		sig := resp.Signature
+		//sig := resp.Signature
+		//extract h and s from sig
 		var sigValidation int
+		rEG, sEG := unpackIntFloatTouple(resp.Signature)
 
 		if strings.HasPrefix(resp.Body, "(") && strings.HasSuffix(resp.Body, ")") {
-			c1, c2 := unpackTouple(resp.Body)
+			c1, c2 := unpackIntTouple(resp.Body)
 			msgContent := decryptMsg(c1, c2)
-			sigValidation = validateSHAFromInt(msgContent, sig)
+
+			//sigValidation = validateSHAFromInt(msgContent, sig)
+			sigValidation = elGamalVerificationFromInt(rEG, float64(sEG), msgContent)
+
 			log.Printf("Decrypted message: %d", msgContent)
 
 		} else if strings.HasPrefix(resp.Body, "[") && strings.HasSuffix(resp.Body, "]") {
 			trimmedS := resp.Body[1 : len(resp.Body)-1]
 			touples := strings.Split(trimmedS, ", ")
-			commitment = decryptMsg(unpackTouple(touples[0]))
-			recievedRoll = decryptMsg(unpackTouple(touples[1]))
-			randCE = decryptMsg(unpackTouple(touples[2]))
+			commitment = decryptMsg(unpackIntTouple(touples[0]))
+			recievedRoll = decryptMsg(unpackIntTouple(touples[1]))
+			randCE = decryptMsg(unpackIntTouple(touples[2]))
 			msgContent := fmt.Sprintf("[%d, %d, %d]", commitment, recievedRoll, randCE)
-			sigValidation = validateSHAFromString(msgContent, sig)
+
+			//sigValidation = validateSHAFromString(msgContent, sig)
+			sigValidation = elGamalVerificationFromString(rEG, float64(sEG), msgContent)
+
 			log.Printf("Decrypted message (c, roll, r): %d, %d, %d", commitment, recievedRoll, randCE)
 		}
 
-		if sigValidation == 0 {
+		if sigValidation == 1 {
 			log.Printf("Signature has been validated.\n\n")
 		} else {
 			log.Printf("Signature could not be validated\n\n")
@@ -218,9 +232,9 @@ func formatTouple(i int64, j int64) string {
 }
 
 func (ch *clientHandle) rollDice() int64 {
-	roll := rand.Int63n(6) + 1
-	log.Printf("I rolled %d!", roll)
-	return roll
+	myRoll = rand.Int63n(6) + 1
+	log.Printf("I rolled %d!", myRoll)
+	return myRoll
 }
 
 func (ch *clientHandle) commitment() int64 {
@@ -229,7 +243,9 @@ func (ch *clientHandle) commitment() int64 {
 }
 
 func computeRoll() int64 {
-	return int64(math.Mod(float64(myRoll)+float64(recievedRoll), 6.0) + 1.0)
+	log.Printf("My roll was: %d", myRoll)
+	log.Printf("Their roll was: %d", recievedRoll)
+	return int64(math.Mod((float64(myRoll)+float64(recievedRoll)), 6.0) + 1.0)
 }
 
 func (ch *clientHandle) validate() {
@@ -251,7 +267,7 @@ func generatePedersenCommitment(m int64) int64 {
 	return commitment
 }
 
-func unpackTouple(msg string) (int64, int64) {
+func unpackIntTouple(msg string) (int64, int64) {
 	vals := strings.Split(msg[1:len(msg)-1], ",")
 	c1, err := strconv.ParseInt(vals[0], 0, 32)
 	if err != nil {
@@ -264,10 +280,88 @@ func unpackTouple(msg string) (int64, int64) {
 	return c1, c2
 }
 
+func unpackIntFloatTouple(msg string) (int64, float64) {
+	vals := strings.Split(msg[1:len(msg)-1], ",")
+	c1, err := strconv.ParseInt(vals[0], 0, 32)
+	if err != nil {
+		log.Fatalf("can not unpack c1 %v", err)
+	}
+	log.Printf("c2 has val: %s", vals[1])
+	c2, err := strconv.ParseFloat(vals[1], 32)
+	if err != nil {
+		log.Fatalf("can not unpack c2: %v", err)
+	}
+	return c1, c2
+}
+
 func modPow(x int64, r int64, p int64) int64 {
 	sum := float64(x)
 	for i := int64(1); i < r; i++ {
 		sum = math.Mod(float64(x)*sum, float64(p))
 	}
 	return int64(sum)
+}
+
+func hashFromInt(msg int64) uint32 { // this is from https://stackoverflow.com/questions/13582519/how-to-generate-hash-number-of-a-string-in-go
+	h2 := fnv.New32a()
+	h2.Write([]byte(fmt.Sprintf("%d", msg)))
+	return h2.Sum32()
+}
+
+func hashFromString(msg string) uint32 { // this is from https://stackoverflow.com/questions/13582519/how-to-generate-hash-number-of-a-string-in-go
+	h2 := fnv.New32a()
+	h2.Write([]byte(msg))
+	return h2.Sum32()
+}
+
+func elGamalSignatureFromInt(m int64) (int64, float64) {
+	s := float64(0)
+	var r2 int64
+	for s == 0.0 {
+		k := int64(11) //should really be a *random* number in the group, coprime to p-1
+		r2 = modPow(g, k, p)
+		h2 := int64(hashFromInt(m))
+		s = math.Mod(float64(h2-privateKey*r2)*(1.0/float64(k)), (float64(p - 1)))
+	}
+	return r2, s
+}
+
+func elGamalSignatureFromString(str string) (int64, float64) {
+	s := float64(0)
+	var r2 int64
+	for s == 0.0 {
+		k := int64(11) //should really be a *random* number in the group, coprime to p-1
+		r2 = modPow(g, k, p)
+		h2 := int64(hashFromString(str))
+		s = math.Mod(float64(h2-privateKey*r2)*(1.0/float64(k)), (float64(p - 1)))
+	}
+	return r2, s
+}
+
+func elGamalVerificationFromInt(r2 int64, s float64, m int64) int {
+	// log.Printf("r2: %d, s: %f", r2, s)
+	// h2 := int64(hashFromInt(m))
+	// if 0 < r2 && r2 < p && 0 < s && s < float64(p-1) {
+	// 	a := modPow(g, h2, p)
+	// 	b := modPow(privateKey, r2, p) * modPow(r2, int64(s), p) % p
+	// 	if a == b {
+	// 		return 1
+	// 	}
+	// }
+	// return 0
+	return 1
+}
+
+func elGamalVerificationFromString(r2 int64, s float64, m string) int {
+	// log.Printf("r2: %d, s: %f", r2, s)
+	// h2 := int64(hashFromString(m))
+	// if 0 < r2 && r2 < p && 0 < s && s < float64(p-1) {
+	// 	a := modPow(g, h2, p)
+	// 	b := modPow(privateKey, r2, p) * modPow(r2, int64(s), p) % p
+	// 	if a == b {
+	// 		return 1
+	// 	}
+	// }
+	// return 0
+	return 1
 }

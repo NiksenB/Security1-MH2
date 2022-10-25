@@ -50,7 +50,7 @@ func (c *ChatServer) JoinChat(user *Chat.User, ccsi Chat.ChattingService_JoinCha
 
 	body := fmt.Sprintf(user.Name + " has joined the chat. The new user's public key should now be validated by the server via. Public Key Autherization.")
 
-	Broadcast("ServerMessage", body, []byte{})
+	Broadcast("ServerMessage", body, "(5,9.0)")
 
 	// block function
 	bl := make(chan bool)
@@ -64,7 +64,7 @@ func (is *ChatServer) SendEncrypted(ctx context.Context, msg *Chat.ClientEncrypt
 	return &Chat.Empty{}, nil
 }
 
-func Broadcast(name string, body string, signature []byte) {
+func Broadcast(name string, body string, signature string) {
 
 	log.Printf("%s : %s)", name, body)
 
