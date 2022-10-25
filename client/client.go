@@ -151,9 +151,8 @@ func (ch *clientHandle) formatArrayMessage() *Chat.ClientContent {
 	enCom := formatTouple(encrypt(commitment))
 	enRoll := formatTouple(encrypt(myRoll))
 	enRan := formatTouple(encrypt(randCE))
-	enRes := formatTouple(encrypt(ch.computeRoll()))
 
-	formattedBody := fmt.Sprintf("[%s, %s, %s, %s]", enCom, enRoll, enRan, enRes)
+	formattedBody := fmt.Sprintf("[%s, %s, %s]", enCom, enRoll, enRan)
 	msg := &Chat.ClientContent{
 		Name: ch.clientName,
 		Body: formattedBody,
@@ -176,13 +175,13 @@ func (ch *clientHandle) commitment() int64 {
 	return generatePedersenCommitment(myRoll)
 }
 
-func (ch *clientHandle) computeRoll() int64 {
+func computeRoll() int64 {
 	return int64(math.Mod(float64(myRoll)+float64(recievedRoll), 6.0) + 1.0)
 }
 
 func (ch *clientHandle) validate() {
 	if math.Pow(float64(g), float64(recievedRoll))*math.Pow(float64(h), float64(randCE)) == float64(commitment) {
-		log.Print("I trust this result.")
+		log.Printf("I have validated the commitment and agreed. The shared roll is %d", computeRoll())
 	} else {
 		log.Printf("I don't trust this result. %f is not the same as %f", math.Pow(float64(g), float64(recievedRoll))*math.Pow(float64(h), float64(randCE)), float64(commitment))
 	}
@@ -225,11 +224,11 @@ func (ch *clientHandle) receiveMessage() {
 		} else if strings.HasPrefix(resp.Body, "[") && strings.HasSuffix(resp.Body, "]") {
 			trimmedS := resp.Body[1 : len(resp.Body)-1]
 			touples := strings.Split(trimmedS, ", ")
+
 			commitment = decrypt(unpackTouple(touples[0]))
 			recievedRoll = decrypt(unpackTouple(touples[1]))
 			randCE = decrypt(unpackTouple(touples[2]))
-			result := decrypt(unpackTouple(touples[3]))
-			log.Printf("Decrypted message: %d, %d, %d, %d", commitment, recievedRoll, randCE, result)
+			log.Printf("Decrypted message: %d, %d, %d", commitment, recievedRoll, randCE)
 		}
 	}
 }
