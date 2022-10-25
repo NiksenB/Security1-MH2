@@ -83,6 +83,21 @@ func (ch *clientHandle) clientConfig() {
 	ch.clientName = strings.TrimRight(msg, "\r\n")
 }
 
+func encrypt(m int64) (int64, int64) {
+	//r = rand.Int31n(p - 1)
+	c1 := int64(math.Mod(math.Pow(float64(g), float64(privateKey)), float64(p)))
+
+	i := math.Mod(math.Pow(float64(othersPublicKey), float64(privateKey)), float64(p))
+	c2 := int64(m) * int64(i) % int64(p)
+	return c1, c2
+}
+
+func decrypt(c1 int64, c2 int64) int64 {
+	s := int64(math.Pow(float64(c1), float64(privateKey))) % p
+	inv := int64(math.Pow(float64(s), float64(p-2))) % p
+	return c2 * inv % p
+}
+
 func (ch *clientHandle) sendMessage(client Chat.ChattingServiceClient) {
 
 	for {
@@ -95,7 +110,7 @@ func (ch *clientHandle) sendMessage(client Chat.ChattingServiceClient) {
 		}
 
 		if strings.HasPrefix(clientMessage, "reveal commitment") {
-			formattedMsg := ch.formatMessageOfImportantInformation()
+			formattedMsg := ch.formatArrayMessage()
 			_, err = client.SendContent(context.Background(), formattedMsg)
 			if err != nil {
 				log.Printf("Error while sending to server :: %v", err)
@@ -131,14 +146,23 @@ func (ch *clientHandle) sendMessage(client Chat.ChattingServiceClient) {
 	}
 }
 
-func (ch *clientHandle) formatMessageOfImportantInformation() *Chat.ClientContent {
+func (ch *clientHandle) formatArrayMessage() *Chat.ClientContent {
 	log.Printf("My commitment was %d", commitment)
-	formattedBody := fmt.Sprintf("[%d, %d, %d, %d]", commitment, myRoll, randCE, ch.computeRoll())
+	enCom := formatTouple(encrypt(commitment))
+	enRoll := formatTouple(encrypt(myRoll))
+	enRan := formatTouple(encrypt(randCE))
+	enRes := formatTouple(encrypt(ch.computeRoll()))
+
+	formattedBody := fmt.Sprintf("[%s, %s, %s, %s]", enCom, enRoll, enRan, enRes)
 	msg := &Chat.ClientContent{
 		Name: ch.clientName,
 		Body: formattedBody,
 	}
 	return msg
+}
+
+func formatTouple(i int64, j int64) string {
+	return fmt.Sprintf("(%d,%d)", i, j)
 }
 
 func (ch *clientHandle) rollDice() int64 {
@@ -172,6 +196,19 @@ func generatePedersenCommitment(m int64) int64 {
 	return commitment
 }
 
+func unpackTouple(msg string) (int64, int64) {
+	vals := strings.Split(msg[1:len(msg)-1], ",")
+	c1, err := strconv.ParseInt(vals[0], 0, 32)
+	if err != nil {
+		log.Fatalf("can not unpack c1 %v", err)
+	}
+	c2, err := strconv.ParseInt(vals[1], 0, 32)
+	if err != nil {
+		log.Fatalf("can not unpack c2: %v", err)
+	}
+	return c1, c2
+}
+
 func (ch *clientHandle) receiveMessage() {
 
 	for {
@@ -179,56 +216,20 @@ func (ch *clientHandle) receiveMessage() {
 		if err != nil {
 			log.Fatalf("can not receive %v", err)
 		}
+		log.Printf("%s : %s", resp.Name, resp.Body)
 
 		if strings.HasPrefix(resp.Body, "(") && strings.HasSuffix(resp.Body, ")") {
-			log.Printf("%s : %s", resp.Name, resp.Body)
+			c1, c2 := unpackTouple(resp.Body)
+			log.Printf("Decrypted message: %d", decrypt(c1, c2))
 
-			vals := strings.Split(resp.Body[1:len(resp.Body)-1], ",")
-			c1, _ := strconv.ParseInt(vals[0], 0, 32)
-			c2, err := strconv.ParseInt(vals[1], 0, 32)
-			if err != nil {
-				log.Fatalf("can not receive %v", err)
-			}
-			decryptAndPrint(c1, c2)
 		} else if strings.HasPrefix(resp.Body, "[") && strings.HasSuffix(resp.Body, "]") {
-
-			unpackAndPrintInformation(resp.Name, resp.Body)
-
+			trimmedS := resp.Body[1 : len(resp.Body)-1]
+			touples := strings.Split(trimmedS, ", ")
+			commitment = decrypt(unpackTouple(touples[0]))
+			recievedRoll = decrypt(unpackTouple(touples[1]))
+			randCE = decrypt(unpackTouple(touples[2]))
+			result := decrypt(unpackTouple(touples[3]))
+			log.Printf("Decrypted message: %d, %d, %d, %d", commitment, recievedRoll, randCE, result)
 		}
 	}
-}
-
-func unpackAndPrintInformation(name string, body string) {
-	s := body[1 : len(body)-1]
-	var revealed = strings.Split(s, ", ")
-
-	c, _ := strconv.ParseInt(revealed[0], 10, 32)
-	commitment = int64(c)
-
-	rr, _ := strconv.ParseInt(revealed[1], 10, 32)
-	recievedRoll = int64(rr)
-
-	r0, _ := strconv.ParseInt(revealed[2], 10, 32)
-	randCE = int64(r0)
-
-	r1, _ := strconv.ParseInt(revealed[3], 10, 32)
-	result := int(r1)
-
-	log.Printf("%s : %d, %d, %d, %d", name, commitment, recievedRoll, randCE, result)
-}
-
-func encrypt(m int64) (int64, int64) {
-	//r = rand.Int31n(p - 1)
-	c1 := int64(math.Mod(math.Pow(float64(g), float64(privateKey)), float64(p)))
-
-	i := math.Mod(math.Pow(float64(othersPublicKey), float64(privateKey)), float64(p))
-	c2 := int64(m) * int64(i) % int64(p)
-	return c1, c2
-}
-
-func decryptAndPrint(c1 int64, c2 int64) {
-	s := int64(math.Pow(float64(c1), float64(privateKey))) % p
-	inv := int64(math.Pow(float64(s), float64(p-2))) % p
-	m := c2 * inv % p
-	log.Printf("Decrypted message: %d", m)
 }
